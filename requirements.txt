@@ -1,0 +1,5 @@
+tensorflow
+numpy
+matplotlib
+boto3
+traci
