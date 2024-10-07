@@ -62,7 +62,7 @@ def main():
         print(f"- {model}")
 
     # S3 model configuration
-    model_key = f'old_models/model_{config["model_to_test"]}.h5'
+    model_key = f'trained_model/model_{config["model_to_test"]}.h5'
     local_model_path = os.path.join(model_path, os.path.basename(model_key))
     
     # Try to download the model from S3
