@@ -7,21 +7,23 @@ from testing_simulation import Simulation
 from generator import TrafficGenerator
 from model import TestModel
 from visualization import Visualization
-from utils import import_test_configuration, set_sumo, set_test_path
+from utils import import_test_configuration, set_sumo
 
-def list_s3_models(bucket_name, prefix='models/'):
-    s3 = boto3.client('s3')
-    try:
-        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
-        models = [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.h5')]
-        return models
-    except Exception as e:
-        print(f"Failed to list S3 bucket contents: {e}")
-        return []
+def create_model_paths(models_path_name, model_number):
+    """Create necessary directories for the model"""
+    base_path = os.getcwd()
+    model_folder_path = os.path.join(base_path, models_path_name, f'model_{model_number}')
+    plot_path = os.path.join(model_folder_path, 'test')
+    
+    os.makedirs(model_folder_path, exist_ok=True)
+    os.makedirs(plot_path, exist_ok=True)
+    
+    return model_folder_path, plot_path
 
 def download_model_from_s3(bucket_name, model_key, local_path):
     s3 = boto3.client('s3')
     try:
+        print(f"Attempting to download {model_key} from {bucket_name} to {local_path}")
         s3.download_file(bucket_name, model_key, local_path)
         print(f"Model {model_key} downloaded successfully from S3 to {local_path}")
         return True
@@ -33,47 +35,39 @@ def download_model_from_s3(bucket_name, model_key, local_path):
         return False
 
 def main():
+    print("Starting main function")
+    
     # Load configuration
     config = import_test_configuration(config_file='testing_settings.ini')
+    print(f"Loaded configuration: {config}")
     
     # Set up SUMO command
     sumo_cmd = set_sumo(config['gui'], config['sumocfg_file_name'], config['max_steps'])
+    print(f"SUMO command: {sumo_cmd}")
     
-    # Get S3 bucket name from environment variable
-    s3_bucket = os.environ.get('S3_BUCKET')
-    if not s3_bucket:
-        print("S3_BUCKET environment variable is not set.")
-        sys.exit(1)
-
     # Set up paths
-    model_path = '/tmp/models'
-    os.makedirs(model_path, exist_ok=True)
-    plot_path = '/tmp/plots'
-    os.makedirs(plot_path, exist_ok=True)
-
-    # List available models in S3
-    available_models = list_s3_models(s3_bucket)
-    if not available_models:
-        print("No models found in the S3 bucket. Please check your S3 bucket configuration.")
-        sys.exit(1)
-    
-    print("Available models in S3:")
-    for model in available_models:
-        print(f"- {model}")
+    model_folder_path, plot_path = create_model_paths(config['models_path_name'], config['model_to_test'])
+    print(f"Model folder path: {model_folder_path}")
+    print(f"Plot path: {plot_path}")
 
     # S3 model configuration
-    model_key = f'trained_model/model_{config["model_to_test"]}.h5'
-    local_model_path = os.path.join(model_path, os.path.basename(model_key))
+    s3_bucket = config['s3']['bucket_name']
+    model_key = config['s3']['model_key']
+    local_model_path = os.path.join(model_folder_path, os.path.basename(model_key))
+    print(f"S3 bucket: {s3_bucket}")
+    print(f"Model key: {model_key}")
+    print(f"Local model path: {local_model_path}")
     
     # Try to download the model from S3
     if not download_model_from_s3(s3_bucket, model_key, local_model_path):
         print("Falling back to local model...")
-        local_model_path = f'models/model_{config["model_to_test"]}.h5'
+        local_model_path = os.path.join(model_folder_path, f'model_{config["model_to_test"]}.h5')
         if not os.path.exists(local_model_path):
             print(f"Local model {local_model_path} not found. Please ensure a model file is available.")
             sys.exit(1)
     
     # Initialize model, traffic generator, and visualization
+    print("Initializing model, traffic generator, and visualization")
     model = TestModel(
         input_dim=config['num_states'],
         model_path=local_model_path
@@ -88,6 +82,7 @@ def main():
     )
     
     # Set up and run simulation
+    print("Setting up simulation")
     simulation = Simulation(
         model,
         traffic_gen,
@@ -105,9 +100,11 @@ def main():
     print("----- Testing info saved at:", plot_path)
     
     # Save results
+    print("Saving results")
     copyfile(src='testing_settings.ini', dst=os.path.join(plot_path, 'testing_settings.ini'))
     visualization.save_data_and_plot(data=simulation.reward_episode, filename='reward', xlabel='Action step', ylabel='Reward')
     visualization.save_data_and_plot(data=simulation.queue_length_episode, filename='queue', xlabel='Step', ylabel='Queue length (vehicles)')
 
 if __name__ == "__main__":
+    print("Starting testing process...")
     main()
